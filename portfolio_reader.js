@@ -8,9 +8,10 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
 
 // Авторизация в Google Sheets API
 const auth = new google.auth.GoogleAuth({
-  credentials: JSON.parse(fs.readFileSync("service-account.json", "utf8")),
+  credentials: JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS),
   scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
 });
+
 
 const sheets = google.sheets({ version: "v4", auth });
 
@@ -57,3 +58,15 @@ async function uploadPortfolioData() {
 // Запуск раз в 1 час
 setInterval(uploadPortfolioData, 60 * 60 * 1000);
 uploadPortfolioData(); // Первый запуск сразу
+
+const express = require("express");
+const app = express();
+
+app.get("/", (req, res) => res.send("Server is running"));
+
+app.listen(3000, () => console.log("Keep-alive server is running"));
+
+// Пинг каждые 20 секунд
+setInterval(() => {
+  require("axios").get(process.env.RENDER_EXTERNAL_URL).catch(() => {});
+}, 20000);
