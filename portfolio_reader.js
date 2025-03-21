@@ -8,7 +8,7 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
 
 // Авторизация в Google Sheets API
 const auth = new google.auth.GoogleAuth({
-  credentials: JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS),
+  credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON),
   scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
 });
 
