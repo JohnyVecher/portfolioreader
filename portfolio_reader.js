@@ -3,15 +3,16 @@ const { google } = require("googleapis");
 const { createClient } = require("@supabase/supabase-js");
 const fs = require("fs");
 
-// Подключаем Supabase
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
-// Авторизация в Google Sheets API
+// Читаем JSON-файл с учетными данными
+const credentialsPath = process.env.GOOGLE_CREDENTIALS_JSON;
+const credentialsJson = fs.readFileSync(credentialsPath, "utf8");
+
 const auth = new google.auth.GoogleAuth({
-  credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON),
+  credentials: JSON.parse(credentialsJson),
   scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
 });
-
 
 const sheets = google.sheets({ version: "v4", auth });
 
@@ -60,13 +61,13 @@ setInterval(uploadPortfolioData, 60 * 60 * 1000);
 uploadPortfolioData(); // Первый запуск сразу
 
 const express = require("express");
+const axios = require("axios");
+
 const app = express();
-
 app.get("/", (req, res) => res.send("Server is running"));
+app.listen(3000, () => console.log("Keep-alive server started"));
 
-app.listen(3000, () => console.log("Keep-alive server is running"));
-
-// Пинг каждые 20 секунд
+// Keep server alive
 setInterval(() => {
-  require("axios").get(process.env.RENDER_EXTERNAL_URL).catch(() => {});
+  axios.get(process.env.RENDER_EXTERNAL_URL).catch(() => {});
 }, 20000);
