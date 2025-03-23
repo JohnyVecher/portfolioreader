@@ -1,27 +1,21 @@
 require("dotenv").config();
 const { google } = require("googleapis");
 const { createClient } = require("@supabase/supabase-js");
-const fs = require("fs");
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
-// Читаем JSON-файл с учетными данными
-const credentialsPath = process.env.GOOGLE_CREDENTIALS_JSON;
-const credentialsJson = fs.readFileSync(credentialsPath, "utf8");
-
 const auth = new google.auth.GoogleAuth({
-  credentials: JSON.parse(credentialsJson),
+  credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON),
   scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
 });
 
 const sheets = google.sheets({ version: "v4", auth });
 
-// Функция для загрузки данных в Supabase
 async function uploadPortfolioData() {
   try {
     const { data } = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.SHEET_ID,
-      range: "TE21B!A1:L100", // Диапазон данных (зависит от таблицы)
+      range: "ТЕ-21б!A1:L100", // Используем название листа из таблицы
     });
 
     const [headers, ...rows] = data.values;
@@ -29,14 +23,14 @@ async function uploadPortfolioData() {
     let records = [];
 
     rows.forEach(row => {
-      const fullName = row[1]; // ФИО
+      const fullName = row[1]; // ФИО во 2-й колонке (B)
       for (let i = 2; i < headers.length; i++) {
         let subject = headers[i]; // Название предмета
         let status = row[i] === "✅"; // Если галочка, значит сдано
 
         records.push({
           full_name: fullName,
-          group: "TE21B",
+          group: "ТЕ-21б",
           subject: subject,
           status: status,
           updated_at: new Date().toISOString(),
@@ -44,20 +38,17 @@ async function uploadPortfolioData() {
       }
     });
 
-    // Отправка в Supabase
     const { error } = await supabase
       .from("portfolio_te21b")
       .upsert(records, { onConflict: ["full_name", "subject"] });
 
     if (error) console.error("Ошибка отправки в Supabase:", error);
-    else console.log("Данные успешно обновлены!");
+    else console.log("✅ Данные успешно обновлены!");
   } catch (err) {
-    console.error("Ошибка при получении данных:", err);
+    console.error("❌ Ошибка при получении данных:", err);
   }
 }
 
-// Запуск раз в 1 час
-setInterval(uploadPortfolioData, 60 * 60 * 1000);
 uploadPortfolioData(); // Первый запуск сразу
 
 const express = require("express");
@@ -65,9 +56,8 @@ const axios = require("axios");
 
 const app = express();
 app.get("/", (req, res) => res.send("Server is running"));
-app.listen(3000, () => console.log("Keep-alive server started"));
+app.listen(3000, () => console.log("🚀 Keep-alive server started"));
 
-// Keep server alive
 setInterval(() => {
   axios.get(process.env.RENDER_EXTERNAL_URL).catch(() => {});
 }, 20000);
