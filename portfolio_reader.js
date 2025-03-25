@@ -31,8 +31,8 @@ async function uploadPortfolioData() {
     rows.forEach(row => {
       const fullName = row[1]; // ФИО
       for (let i = 2; i < headers.length; i++) {
-        let subject = headers[i]; // Название предмета
-        let status = row[i] === "✅"; // Если галочка, значит сдано
+        let subject = headers[i];
+        let status = ["TRUE", "FALSE"].includes(cellValue?.trim());
 
         records.push({
           full_name: fullName,
