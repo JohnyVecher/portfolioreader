@@ -29,20 +29,21 @@ async function uploadPortfolioData() {
     let records = [];
 
     rows.forEach(row => {
-      const fullName = row[1]; // ФИО
-      for (let i = 2; i < headers.length; i++) {
-        let subject = headers[i];
-        let status = ["TRUE", "FALSE"].includes(cellValue?.trim());
+  const fullName = row[1]; // ФИО
+  for (let i = 2; i < headers.length; i++) {
+    let subject = headers[i];
+    let cellValue = row[i]; // Добавлено определение cellValue
+    let status = ["TRUE", "FALSE"].includes(cellValue?.trim().toUpperCase()); // Добавлено toUpperCase()
 
-        records.push({
-          full_name: fullName,
-          group: "TE21B",
-          subject: subject,
-          status: status,
-          updated_at: new Date().toISOString(),
-        });
-      }
+    records.push({
+      full_name: fullName,
+      group: "TE21B",
+      subject: subject,
+      status: status,
+      updated_at: new Date().toISOString(),
     });
+  }
+});
 
     // Отправка в Supabase
     const { error } = await supabase
