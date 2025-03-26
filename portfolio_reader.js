@@ -13,8 +13,7 @@ app.use(cors());
 app.options("*", cors());
 
 app.use(cors({
-  origin: "http://localhost:3000", // Для локальной разработки
-  // origin: "https://your-frontend.com", // Замени на свой домен на проде
+  origin: "*", // временно разрешаем все запросы
   methods: "GET,POST",
   allowedHeaders: "Content-Type,Authorization",
 }));
@@ -85,6 +84,7 @@ setInterval(() => {
 
 app.get("/user-subjects", async (req, res) => {
   const { firstName, lastName } = req.query;
+  console.log("Получен запрос:", firstName, lastName); // Посмотреть, что передаётся
 
   if (!firstName || !lastName) {
     return res.status(400).json({ error: "Имя и фамилия обязательны" });
