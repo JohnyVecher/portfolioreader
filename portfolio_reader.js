@@ -8,8 +8,10 @@ const cors = require("cors");
 
 const app = express();
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+ 
+app.use(cors());
+app.options("*", cors());
 
-// Разрешаем CORS для фронтенда
 app.use(cors({
   origin: "http://localhost:3000", // Для локальной разработки
   // origin: "https://your-frontend.com", // Замени на свой домен на проде
@@ -88,19 +90,22 @@ app.get("/user-subjects", async (req, res) => {
     return res.status(400).json({ error: "Имя и фамилия обязательны" });
   }
 
-  // Ищем "Фамилия Имя" в "Фамилия Имя Отчество"
-  const searchPattern = `%${lastName} ${firstName}%`;
+  try {
+    // Формируем поиск по подстроке
+    const searchPattern = `${lastName} ${firstName}`;
 
-  const { data: subjects, error } = await supabase
-    .from("portfolio_te21b")
-    .select("subject")
-    .ilike("full_name", searchPattern) // Теперь ищем по подстроке
-    .eq("status", true);
+    const { data: subjects, error } = await supabase
+      .from("portfolio_te21b")
+      .select("subject")
+      .ilike("full_name", `%${searchPattern}%`) // Ищем подстроку
+      .eq("status", true);
 
-  if (error) {
-    return res.status(500).json({ error: "Ошибка при получении данных" });
+    if (error) throw error;
+
+    res.json({ subjects: subjects.map((item) => item.subject) });
+  } catch (err) {
+    console.error("Ошибка при получении данных:", err);
+    res.status(500).json({ error: "Ошибка сервера" });
   }
-
-  res.json({ subjects: subjects.map((item) => item.subject) });
 });
 
