@@ -72,3 +72,27 @@ app.listen(3000, () => console.log("Keep-alive server started"));
 setInterval(() => {
   axios.get(process.env.RENDER_EXTERNAL_URL).catch(() => {});
 }, 20000);
+
+
+app.get("/user-subjects", async (req, res) => {
+  const { firstName, lastName } = req.query; // Получаем имя и фамилию из запроса
+
+  if (!firstName || !lastName) {
+    return res.status(400).json({ error: "Имя и фамилия обязательны" });
+  }
+
+  const fullName = `${lastName} ${firstName}`;
+
+  // Ищем сданные предметы по ФИО
+  const { data: subjects, error } = await supabase
+    .from("portfolio_te21b")
+    .select("subject")
+    .eq("full_name", fullName)
+    .eq("status", true);
+
+  if (error) {
+    return res.status(500).json({ error: "Ошибка при получении данных" });
+  }
+
+  res.json({ subjects: subjects.map((item) => item.subject) });
+});
