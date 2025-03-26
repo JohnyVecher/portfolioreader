@@ -81,7 +81,6 @@ setInterval(() => {
   axios.get(process.env.RENDER_EXTERNAL_URL).catch(() => {});
 }, 20000);
 
-// Эндпоинт для получения сданных предметов пользователя
 app.get("/user-subjects", async (req, res) => {
   const { firstName, lastName } = req.query;
 
@@ -89,13 +88,13 @@ app.get("/user-subjects", async (req, res) => {
     return res.status(400).json({ error: "Имя и фамилия обязательны" });
   }
 
-  const fullName = `${lastName} ${firstName}`; // Приводим к формату хранения в БД
+  // Ищем "Фамилия Имя" в "Фамилия Имя Отчество"
+  const searchPattern = `%${lastName} ${firstName}%`;
 
-  // Запрос к Supabase
   const { data: subjects, error } = await supabase
     .from("portfolio_te21b")
     .select("subject")
-    .eq("full_name", fullName)
+    .ilike("full_name", searchPattern) // Теперь ищем по подстроке
     .eq("status", true);
 
   if (error) {
@@ -104,3 +103,4 @@ app.get("/user-subjects", async (req, res) => {
 
   res.json({ subjects: subjects.map((item) => item.subject) });
 });
+
