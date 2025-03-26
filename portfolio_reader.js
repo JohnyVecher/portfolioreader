@@ -2,8 +2,20 @@ require("dotenv").config();
 const { google } = require("googleapis");
 const { createClient } = require("@supabase/supabase-js");
 const fs = require("fs");
+const express = require("express");
+const axios = require("axios");
+const cors = require("cors");
 
+const app = express();
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+
+// Разрешаем CORS для фронтенда
+app.use(cors({
+  origin: "http://localhost:3000", // Для локальной разработки
+  // origin: "https://your-frontend.com", // Замени на свой домен на проде
+  methods: "GET,POST",
+  allowedHeaders: "Content-Type,Authorization",
+}));
 
 // Читаем JSON-файл с учетными данными
 const credentialsPath = process.env.GOOGLE_CREDENTIALS_JSON;
@@ -25,25 +37,24 @@ async function uploadPortfolioData() {
     });
 
     const [headers, ...rows] = data.values;
-
     let records = [];
 
     rows.forEach(row => {
-  const fullName = row[1]; // ФИО
-  for (let i = 2; i < headers.length; i++) {
-    let subject = headers[i];
-    let cellValue = row[i]; // Добавлено определение cellValue
-    let status = ["TRUE", "FALSE"].includes(cellValue?.trim().toUpperCase()); // Добавлено toUpperCase()
+      const fullName = row[1]; // ФИО
+      for (let i = 2; i < headers.length; i++) {
+        let subject = headers[i];
+        let cellValue = row[i]?.trim().toUpperCase(); 
+        let status = cellValue === "TRUE"; // Проверяем статус
 
-    records.push({
-      full_name: fullName,
-      group: "TE21B",
-      subject: subject,
-      status: status,
-      updated_at: new Date().toISOString(),
+        records.push({
+          full_name: fullName,
+          group: "TE21B",
+          subject: subject,
+          status: status,
+          updated_at: new Date().toISOString(),
+        });
+      }
     });
-  }
-});
 
     // Отправка в Supabase
     const { error } = await supabase
@@ -61,29 +72,26 @@ async function uploadPortfolioData() {
 setInterval(uploadPortfolioData, 60 * 60 * 1000);
 uploadPortfolioData(); // Первый запуск сразу
 
-const express = require("express");
-const axios = require("axios");
-
-const app = express();
+// Keep-alive сервер
 app.get("/", (req, res) => res.send("Server is running"));
-app.listen(3000, () => console.log("Keep-alive server started"));
 
-// Keep server alive
+app.listen(3000, () => console.log("Server started on port 3000"));
+
 setInterval(() => {
   axios.get(process.env.RENDER_EXTERNAL_URL).catch(() => {});
 }, 20000);
 
-
+// Эндпоинт для получения сданных предметов пользователя
 app.get("/user-subjects", async (req, res) => {
-  const { firstName, lastName } = req.query; // Получаем имя и фамилию из запроса
+  const { firstName, lastName } = req.query;
 
   if (!firstName || !lastName) {
     return res.status(400).json({ error: "Имя и фамилия обязательны" });
   }
 
-  const fullName = `${lastName} ${firstName}`;
+  const fullName = `${lastName} ${firstName}`; // Приводим к формату хранения в БД
 
-  // Ищем сданные предметы по ФИО
+  // Запрос к Supabase
   const { data: subjects, error } = await supabase
     .from("portfolio_te21b")
     .select("subject")
