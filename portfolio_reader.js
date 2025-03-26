@@ -5,32 +5,37 @@ const fs = require("fs");
 const express = require("express");
 const axios = require("axios");
 const cors = require("cors");
+const morgan = require("morgan"); // Добавляем логирование запросов
 
 const app = express();
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
-// Единая настройка CORS
+// 1. Middleware Configuration
+app.use(morgan("dev")); // Логирование всех запросов
 app.use(cors({
   origin: "*",
   methods: "GET,POST",
   allowedHeaders: "Content-Type,Authorization",
 }));
-
-// Парсинг JSON (если понадобится для будущих эндпоинтов)
 app.use(express.json());
 
-// Чтение учетных данных Google
-const credentialsPath = process.env.GOOGLE_CREDENTIALS_JSON;
-const credentialsJson = fs.readFileSync(credentialsPath, "utf8");
+// 2. Google Sheets Authentication
+try {
+  const credentialsPath = process.env.GOOGLE_CREDENTIALS_JSON;
+  const credentialsJson = fs.readFileSync(credentialsPath, "utf8");
+  
+  const auth = new google.auth.GoogleAuth({
+    credentials: JSON.parse(credentialsJson),
+    scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
+  });
 
-const auth = new google.auth.GoogleAuth({
-  credentials: JSON.parse(credentialsJson),
-  scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
-});
+  const sheets = google.sheets({ version: "v4", auth });
+} catch (error) {
+  console.error("FATAL ERROR: Google Auth failed:", error.message);
+  process.exit(1);
+}
 
-const sheets = google.sheets({ version: "v4", auth });
-
-// Функция загрузки данных в Supabase
+// 3. Data Sync Functions
 async function uploadPortfolioData() {
   try {
     const { data } = await sheets.spreadsheets.values.get({
@@ -42,19 +47,23 @@ async function uploadPortfolioData() {
     const records = [];
 
     rows.forEach(row => {
-      const fullName = row[1];
+      const fullName = row[1]?.trim();
+      if (!fullName) return;
+
       for (let i = 2; i < headers.length; i++) {
-        const subject = headers[i];
+        const subject = headers[i]?.trim();
         const cellValue = row[i]?.trim().toUpperCase();
         const status = cellValue === "TRUE";
 
-        records.push({
-          full_name: fullName,
-          group: "TE21B",
-          subject: subject,
-          status: status,
-          updated_at: new Date().toISOString(),
-        });
+        if (subject) {
+          records.push({
+            full_name: fullName,
+            group: "TE21B",
+            subject: subject,
+            status: status,
+            updated_at: new Date().toISOString(),
+          });
+        }
       }
     });
 
@@ -62,67 +71,92 @@ async function uploadPortfolioData() {
       .from("portfolio_te21b")
       .upsert(records, { onConflict: ["full_name", "subject"] });
 
-    if (error) console.error("Supabase upload error:", error);
-    else console.log("Data updated successfully");
+    if (error) {
+      console.error("Supabase upload error:", error);
+    } else {
+      console.log(`Data updated successfully (${records.length} records)`);
+    }
   } catch (err) {
-    console.error("Google Sheets error:", err);
+    console.error("Google Sheets sync error:", err.message);
   }
 }
 
-// Запуск обновления данных
-setInterval(uploadPortfolioData, 60 * 60 * 1000);
-uploadPortfolioData();
-
-// Keep-alive эндпоинт
-app.get("/", (req, res) => {
-  res.send("Portfolio Reader API is running");
+// 4. Endpoints
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: "OK",
+    timestamp: new Date().toISOString(),
+    version: process.env.npm_package_version
+  });
 });
 
-// Основной эндпоинт для фронта
 app.get("/user-subjects", async (req, res) => {
   try {
     const { firstName, lastName } = req.query;
-    
+    console.log("Request received:", { firstName, lastName });
+
     if (!firstName || !lastName) {
-      return res.status(400).json({ error: "Missing name parameters" });
+      return res.status(400).json({
+        success: false,
+        error: "Параметры firstName и lastName обязательны"
+      });
     }
 
-    const searchPattern = `${lastName} ${firstName}`;
-    
-    const { data: subjects, error } = await supabase
+    const searchPattern = `${lastName.trim()} ${firstName.trim()}`;
+    console.log("Search pattern:", searchPattern);
+
+    const { data, error } = await supabase
       .from("portfolio_te21b")
       .select("subject")
       .ilike("full_name", `%${searchPattern}%`)
       .eq("status", true);
 
-    if (error) throw error;
+    if (error) {
+      console.error("Supabase error:", error);
+      return res.status(500).json({
+        success: false,
+        error: "Ошибка базы данных"
+      });
+    }
 
-    res.json({ 
+    console.log("Found subjects:", data);
+    res.json({
       success: true,
-      subjects: subjects.map(item => item.subject) 
+      subjects: data.map(item => item.subject) 
     });
     
   } catch (err) {
-    console.error("API Error:", err);
+    console.error("API Error:", err.stack);
     res.status(500).json({ 
       success: false,
-      error: "Internal server error" 
+      error: "Внутренняя ошибка сервера" 
     });
   }
 });
 
-// Настройка порта
+// 5. Server Initialization
 const PORT = process.env.PORT || 3000;
 
-// Запуск сервера
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   
-  // Keep-alive для Render
+  // Initial data sync
+  uploadPortfolioData();
+  
+  // Scheduled sync
+  setInterval(uploadPortfolioData, 60 * 60 * 1000);
+
+  // Keep-alive for Render
   if (process.env.NODE_ENV === "production") {
     setInterval(() => {
       axios.get(process.env.RENDER_EXTERNAL_URL)
         .catch(error => console.log("Keep-alive ping failed:", error.message));
     }, 20_000);
   }
+});
+
+// 6. Error Handling
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("Unhandled Rejection at:", promise, "reason:", reason);
+  server.close(() => process.exit(1));
 });
