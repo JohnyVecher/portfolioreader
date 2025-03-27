@@ -75,7 +75,7 @@ app.get("/user-subjects", async (req, res) => {
   }
 
   // Исправлен порядок имени/фамилии
-  const searchPattern = `%${firstName} ${lastName}%`;
+  const searchPattern = `%${lastName} ${firstName}%`;
   console.log("🔍 Поиск по шаблону:", searchPattern);
 
   try {
