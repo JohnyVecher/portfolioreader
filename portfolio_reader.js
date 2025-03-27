@@ -9,19 +9,27 @@ const morgan = require("morgan");
 
 const app = express();
 
-// Объявляем переменные в глобальной области видимости
+// 🔹 Проверяем, загружаются ли переменные окружения
+console.log("🔧 SUPABASE_URL:", process.env.SUPABASE_URL);
+console.log("🔧 SUPABASE_KEY:", process.env.SUPABASE_KEY ? "✅" : "⛔ МISSING");
+console.log("🔧 SHEET_ID:", process.env.SHEET_ID);
+console.log("🔧 GOOGLE_CREDENTIALS_JSON:", process.env.GOOGLE_CREDENTIALS_JSON);
+
 let supabase;
 let sheets;
 
 async function initializeServices() {
   try {
-    // 1. Инициализация Supabase
+    // 🔹 1. Инициализация Supabase
     supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
-    // 2. Инициализация Google Sheets
+    // 🔹 2. Инициализация Google Sheets
     const credentialsPath = process.env.GOOGLE_CREDENTIALS_JSON;
+    if (!fs.existsSync(credentialsPath)) {
+      throw new Error(`Файл ${credentialsPath} не найден!`);
+    }
+
     const credentialsJson = fs.readFileSync(credentialsPath, "utf8");
-    
     const auth = new google.auth.GoogleAuth({
       credentials: JSON.parse(credentialsJson),
       scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
@@ -29,7 +37,7 @@ async function initializeServices() {
 
     sheets = google.sheets({ version: "v4", auth });
 
-    // Проверка подключения
+    // 🔹 Проверяем подключение к Google Sheets
     await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.SHEET_ID,
       range: "ТЕ-21б!A1:A1",
@@ -37,57 +45,101 @@ async function initializeServices() {
 
     console.log("✅ Services initialized successfully");
   } catch (error) {
-    console.error("🔥 Failed to initialize services:", error.message);
+    console.error("🔥 Ошибка инициализации сервисов:", error.message);
     process.exit(1);
   }
 }
 
-// Middleware
+// 🔹 Middleware
 app.use(morgan("dev"));
 app.use(cors({
-  origin: "*",
+  origin: "*",  // Разрешаем запросы со всех доменов (на время отладки)
   methods: "GET,POST",
   allowedHeaders: "Content-Type,Authorization",
 }));
 app.use(express.json());
 
-// Функция синхронизации данных
+// 📌 **Функция синхронизации данных из Google Sheets**
 async function uploadPortfolioData() {
   try {
+    console.log("🔄 Синхронизация данных с Google Sheets...");
+    
     const { data } = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.SHEET_ID,
-      range: "ТЕ-21б!A1:L100",
+      range: "ТЕ-21б!A1:L100",  // Загружаем данные
     });
 
-    // ... остальная часть функции без изменений ...
+    const rows = data.values;
+    if (!rows || rows.length === 0) {
+      console.log("❌ Нет данных в Google Sheets.");
+      return;
+    }
+
+    // 🔹 Удаляем старые данные перед загрузкой новых
+    await supabase.from("portfolio_te21b").delete().neq("id", 0);
+
+    // 🔹 Парсим данные
+    const formattedData = rows.slice(1).map(row => ({
+      full_name: `${row[1]} ${row[0]}`.trim(),  // Фамилия + Имя
+      subject: row[2]?.trim() || "Неизвестный предмет",
+      status: row[3]?.toLowerCase() === "сдано",
+    }));
+
+    // 🔹 Загружаем в Supabase
+    const { error } = await supabase.from("portfolio_te21b").insert(formattedData);
+    if (error) throw error;
+
+    console.log(`✅ Загружено ${formattedData.length} записей в Supabase.`);
   } catch (err) {
-    console.error("Google Sheets sync error:", err.message);
+    console.error("🔥 Ошибка синхронизации с Google Sheets:", err.message);
   }
 }
 
-// Эндпоинты
+// 📌 **Эндпоинт для получения предметов пользователя**
 app.get("/user-subjects", async (req, res) => {
-  // ... реализация эндпоинта ...
+  try {
+    const { firstName, lastName } = req.query;
+
+    if (!firstName || !lastName) {
+      return res.status(400).json({ error: "Имя и фамилия обязательны" });
+    }
+
+    console.log(`🔍 Ищем предметы для: ${lastName} ${firstName}`);
+
+    // 🔹 Поиск по ФИО
+    const searchPattern = `%${lastName} ${firstName}%`;
+    const { data: subjects, error } = await supabase
+      .from("portfolio_te21b")
+      .select("subject")
+      .ilike("full_name", searchPattern)
+      .eq("status", true);
+
+    if (error) throw error;
+
+    res.json({ subjects: subjects.map(item => item.subject) });
+  } catch (err) {
+    console.error("🔥 Ошибка при получении предметов:", err.message);
+    res.status(500).json({ error: "Ошибка сервера" });
+  }
 });
 
-// Инициализация и запуск сервера
+// 📌 **Запуск сервера**
 async function startServer() {
   try {
     await initializeServices();
-    
+
     const PORT = process.env.PORT || 3000;
-    const server = app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-      
-      // Начальная синхронизация
+    app.listen(PORT, () => {
+      console.log(`🚀 Сервер запущен на порту ${PORT}`);
+
+      // 🔹 Запускаем синхронизацию данных при старте
       uploadPortfolioData();
-      
-      // Периодическая синхронизация
+
+      // 🔹 Устанавливаем периодическую синхронизацию (раз в час)
       setInterval(uploadPortfolioData, 60 * 60 * 1000);
     });
-
   } catch (error) {
-    console.error("Failed to start server:", error);
+    console.error("🔥 Ошибка запуска сервера:", error);
     process.exit(1);
   }
 }
