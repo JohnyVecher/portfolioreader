@@ -18,17 +18,14 @@ console.log("🔧 SHEET_ID:", process.env.SHEET_ID);
 console.log("🔧 GOOGLE_CREDENTIALS_JSON:", process.env.GOOGLE_CREDENTIALS_JSON);
 
 // Инициализация Supabase
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_KEY
-);
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 // Middleware
 app.use(morgan("dev"));
 app.use(cors());
 app.use(express.json());
 
-// Проверка подключения к Google Sheets
+// Подключение к Google Sheets
 let sheets;
 async function initializeGoogleSheets() {
   try {
@@ -56,43 +53,44 @@ async function initializeGoogleSheets() {
     console.log("✅ Google Sheets API подключен");
   } catch (error) {
     console.error("🔥 Критическая ошибка Google Sheets:", error.message);
-    console.error("Детали ошибки:", error.stack);
     process.exit(1);
   }
 }
 
-// Функция импорта данных из Google Sheets в Supabase
-async function importDataFromGoogleSheets() {
+// Функция загрузки данных из Google Sheets
+async function loadDataFromSheets() {
   try {
-    const spreadsheetId = process.env.SHEET_ID;
+    const groups = ["ТЕ-21б", "ТЕ-31б"];
+    let allData = [];
 
-    // Запрашиваем данные из таблиц ТЕ-21б и ТЕ-31б
-    const ranges = ["ТЕ-21б!A1:Z1000", "ТЕ-31б!A1:Z1000"];
-    const responses = await Promise.all(
-      ranges.map(range => sheets.spreadsheets.values.get({ spreadsheetId, range }))
-    );
+    for (const group of groups) {
+      const response = await sheets.spreadsheets.values.get({
+        spreadsheetId: process.env.SHEET_ID,
+        range: `${group}!A1:C`, // Предполагаем, что данные в колонках A, B, C
+      });
 
-    // Функция обработки данных
-    const processSheetData = (data, group) => {
-      if (!data.values || data.values.length === 0) return [];
+      if (!response.data.values || response.data.values.length < 2) {
+        console.warn(`⚠️ Данные из ${group} отсутствуют или пусты.`);
+        continue;
+      }
 
-      const headers = data.values[0];
-      return data.values.slice(1).map(row => {
+      const headers = response.data.values[0].map(h => h.trim().toLowerCase());
+      const rows = response.data.values.slice(1);
+
+      const processedData = rows.map(row => {
         let entry = { group };
         headers.forEach((header, index) => {
           entry[header] = row[index] || null;
         });
         return entry;
       });
-    };
 
-    // Обрабатываем данные для каждой группы
-    const te21bData = processSheetData(responses[0].data, "TE-21b");
-    const te31bData = processSheetData(responses[1].data, "TE-31b");
+      allData = allData.concat(processedData);
+    }
 
-    const allData = [...te21bData, ...te31bData];
+    console.log("📊 Загружены данные:", allData);
 
-    // Загружаем данные в Supabase
+    // Загрузка данных в Supabase
     const { error } = await supabase
       .from("portfolio_te21b")
       .upsert(allData, { onConflict: ["full_name", "subject"] });
@@ -100,32 +98,14 @@ async function importDataFromGoogleSheets() {
     if (error) {
       console.error("❌ Ошибка загрузки в Supabase:", error);
     } else {
-      console.log(`✅ Загружено ${allData.length} записей`);
+      console.log("✅ Данные успешно загружены в Supabase!");
     }
   } catch (error) {
-    console.error("❌ Ошибка при импорте из Google Sheets:", error);
+    console.error("🔥 Ошибка загрузки данных из Google Sheets:", error.message);
   }
 }
 
-// Запуск сервера
-async function startServer() {
-  try {
-    await initializeGoogleSheets();
-
-    app.listen(PORT, () => {
-      console.log(`🚀 Сервер запущен на порту ${PORT}`);
-      console.log("Ссылка для доступа:", process.env.RENDER_EXTERNAL_URL);
-    });
-
-    importDataFromGoogleSheets();
-    setInterval(importDataFromGoogleSheets, 1000 * 60 * 10);
-  } catch (error) {
-    console.error("🔥 Не удалось запустить сервер:", error);
-    process.exit(1);
-  }
-}
-
-// API для получения предметов пользователя
+// API для получения данных
 app.get("/user-subjects", async (req, res) => {
   console.log("🔍 Запрос получен:", req.query);
 
@@ -140,22 +120,17 @@ app.get("/user-subjects", async (req, res) => {
   try {
     const { data: subjects, error } = await supabase
       .from("portfolio_te21b")
-      .select("subject, status, group")
+      .select("subject, status")
       .ilike("full_name", searchPattern);
 
     if (error) {
-      console.error("❌ Ошибка Supabase:", error.code, error.message);
-      return res.status(500).json({
-        error: "Ошибка базы данных",
-        details: error.message
-      });
+      console.error("❌ Ошибка Supabase:", error.message);
+      return res.status(500).json({ error: "Ошибка базы данных", details: error.message });
     }
 
-    // Группировка по статусам
     const result = {
       passed: subjects.filter(item => item.status === true).map(item => item.subject),
-      notPassed: subjects.filter(item => item.status === false).map(item => item.subject),
-      group: subjects.length > 0 ? subjects[0].group : null
+      notPassed: subjects.filter(item => item.status === false).map(item => item.subject)
     };
 
     res.json(result);
@@ -170,13 +145,31 @@ app.get("/", (req, res) => {
   res.send("✅ API работает");
 });
 
+// Запуск сервера
+async function startServer() {
+  try {
+    await initializeGoogleSheets();
+    await loadDataFromSheets();
+
+    app.listen(PORT, () => {
+      console.log(`🚀 Сервер запущен на порту ${PORT}`);
+      console.log("Ссылка для доступа:", process.env.RENDER_EXTERNAL_URL);
+    });
+
+    setInterval(loadDataFromSheets, 5 * 60 * 1000); // Обновление данных каждые 5 минут
+  } catch (error) {
+    console.error("🔥 Не удалось запустить сервер:", error);
+    process.exit(1);
+  }
+}
+
 // Автоматический пинг для Render
 const keepAwake = () => {
-    setInterval(() => {
-        fetch('https://portfolioreader.onrender.com/')
-            .then(() => console.log("Сервер пробужден"))
-            .catch(err => console.error("Ошибка пробуждения сервера:", err));
-    }, 20000);
+  setInterval(() => {
+    fetch("https://portfolioreader.onrender.com/")
+      .then(() => console.log("Сервер пробужден"))
+      .catch(err => console.error("Ошибка пробуждения сервера:", err));
+  }, 20000);
 };
 
 startServer();
