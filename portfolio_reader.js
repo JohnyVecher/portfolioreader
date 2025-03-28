@@ -120,4 +120,13 @@ async function startServer() {
   }
 }
 
+// Автоматический пинг для Render
+const keepAwake = () => {
+    setInterval(() => {
+        fetch('https://backend-schedule-b6vy.onrender.com')
+            .then(() => console.log("Сервер пробужден"))
+            .catch(err => console.error("Ошибка пробуждения сервера:", err));
+    }, 20000);
+};
+
 startServer();
