@@ -61,7 +61,71 @@ async function initializeGoogleSheets() {
   }
 }
 
-// Получение предметов с статусами
+// Функция импорта данных из Google Sheets в Supabase
+async function importDataFromGoogleSheets() {
+  try {
+    const spreadsheetId = process.env.SHEET_ID;
+
+    // Запрашиваем данные из таблиц ТЕ-21б и ТЕ-31б
+    const ranges = ["ТЕ-21б!A1:Z1000", "ТЕ-31б!A1:Z1000"];
+    const responses = await Promise.all(
+      ranges.map(range => sheets.spreadsheets.values.get({ spreadsheetId, range }))
+    );
+
+    // Функция обработки данных
+    const processSheetData = (data, group) => {
+      if (!data.values || data.values.length === 0) return [];
+
+      const headers = data.values[0];
+      return data.values.slice(1).map(row => {
+        let entry = { group };
+        headers.forEach((header, index) => {
+          entry[header] = row[index] || null;
+        });
+        return entry;
+      });
+    };
+
+    // Обрабатываем данные для каждой группы
+    const te21bData = processSheetData(responses[0].data, "TE-21b");
+    const te31bData = processSheetData(responses[1].data, "TE-31b");
+
+    const allData = [...te21bData, ...te31bData];
+
+    // Загружаем данные в Supabase
+    const { error } = await supabase
+      .from("portfolio_te21b")
+      .upsert(allData, { onConflict: ["full_name", "subject"] });
+
+    if (error) {
+      console.error("❌ Ошибка загрузки в Supabase:", error);
+    } else {
+      console.log(`✅ Загружено ${allData.length} записей`);
+    }
+  } catch (error) {
+    console.error("❌ Ошибка при импорте из Google Sheets:", error);
+  }
+}
+
+// Запуск сервера
+async function startServer() {
+  try {
+    await initializeGoogleSheets();
+
+    app.listen(PORT, () => {
+      console.log(`🚀 Сервер запущен на порту ${PORT}`);
+      console.log("Ссылка для доступа:", process.env.RENDER_EXTERNAL_URL);
+    });
+
+    importDataFromGoogleSheets();
+    setInterval(importDataFromGoogleSheets, 1000 * 60 * 10);
+  } catch (error) {
+    console.error("🔥 Не удалось запустить сервер:", error);
+    process.exit(1);
+  }
+}
+
+// API для получения предметов пользователя
 app.get("/user-subjects", async (req, res) => {
   console.log("🔍 Запрос получен:", req.query);
 
@@ -76,7 +140,7 @@ app.get("/user-subjects", async (req, res) => {
   try {
     const { data: subjects, error } = await supabase
       .from("portfolio_te21b")
-      .select("subject, status")
+      .select("subject, status, group")
       .ilike("full_name", searchPattern);
 
     if (error) {
@@ -90,7 +154,8 @@ app.get("/user-subjects", async (req, res) => {
     // Группировка по статусам
     const result = {
       passed: subjects.filter(item => item.status === true).map(item => item.subject),
-      notPassed: subjects.filter(item => item.status === false).map(item => item.subject)
+      notPassed: subjects.filter(item => item.status === false).map(item => item.subject),
+      group: subjects.length > 0 ? subjects[0].group : null
     };
 
     res.json(result);
@@ -105,25 +170,10 @@ app.get("/", (req, res) => {
   res.send("✅ API работает");
 });
 
-// Запуск сервера
-async function startServer() {
-  try {
-    await initializeGoogleSheets();
-    
-    app.listen(PORT, () => {
-      console.log(`🚀 Сервер запущен на порту ${PORT}`);
-      console.log("Ссылка для доступа:", process.env.RENDER_EXTERNAL_URL);
-    });
-  } catch (error) {
-    console.error("🔥 Не удалось запустить сервер:", error);
-    process.exit(1);
-  }
-}
-
 // Автоматический пинг для Render
 const keepAwake = () => {
     setInterval(() => {
-        fetch('https://backend-schedule-b6vy.onrender.com')
+        fetch('https://portfolioreader.onrender.com/')
             .then(() => console.log("Сервер пробужден"))
             .catch(err => console.error("Ошибка пробуждения сервера:", err));
     }, 20000);
